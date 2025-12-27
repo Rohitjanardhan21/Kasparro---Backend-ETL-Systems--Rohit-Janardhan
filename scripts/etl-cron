@@ -1,0 +1,4 @@
+# Kasparro ETL Cron Job
+# Runs ETL process every hour
+
+0 * * * * root cd /app && python -m ingestion.main >> /app/logs/etl-cron.log 2>&1

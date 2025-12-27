@@ -1,0 +1,195 @@
+"""Data endpoint for retrieving normalized cryptocurrency data."""
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
+from typing import Optional, Dict, Any, List
+import time
+import structlog
+
+from core.database import get_db
+from schemas.models import NormalizedCryptoData
+from schemas.pydantic_models import DataResponse, NormalizedCryptoResponse, DataQueryParams
+
+logger = structlog.get_logger(__name__)
+
+router = APIRouter()
+
+
+@router.get("/data", response_model=DataResponse)
+async def get_data(
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(100, ge=1, le=1000, description="Number of records per page"),
+    source: Optional[str] = Query(None, description="Filter by data source (coinpaprika, coingecko, csv)"),
+    coin_id: Optional[str] = Query(None, description="Filter by coin ID"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """
+    Retrieve paginated cryptocurrency data with filtering options.
+    
+    Returns normalized cryptocurrency data from all sources with pagination
+    and filtering capabilities. Includes request metadata and performance metrics.
+    """
+    start_time = time.time()
+    request_id = getattr(request.state, "request_id", "unknown") if request else "unknown"
+    
+    try:
+        # Validate query parameters
+        query_params = DataQueryParams(
+            page=page,
+            limit=limit,
+            source=source,
+            coin_id=coin_id,
+            symbol=symbol
+        )
+        
+        # Build query
+        query = db.query(NormalizedCryptoData)
+        
+        # Apply filters
+        if query_params.source:
+            query = query.filter(NormalizedCryptoData.source == query_params.source)
+        
+        if query_params.coin_id:
+            query = query.filter(NormalizedCryptoData.coin_id.ilike(f"%{query_params.coin_id}%"))
+        
+        if query_params.symbol:
+            query = query.filter(NormalizedCryptoData.symbol.ilike(f"%{query_params.symbol}%"))
+        
+        # Get total count for pagination
+        total_count = query.count()
+        
+        # Apply pagination and ordering
+        offset = (query_params.page - 1) * query_params.limit
+        records = query.order_by(desc(NormalizedCryptoData.processed_at)).offset(offset).limit(query_params.limit).all()
+        
+        # Calculate pagination metadata
+        total_pages = (total_count + query_params.limit - 1) // query_params.limit
+        has_next = query_params.page < total_pages
+        has_prev = query_params.page > 1
+        
+        # Calculate latency
+        latency_ms = (time.time() - start_time) * 1000
+        
+        # Convert to response models
+        data = [NormalizedCryptoResponse.from_orm(record) for record in records]
+        
+        # Build response
+        response = DataResponse(
+            data=data,
+            pagination={
+                "page": query_params.page,
+                "limit": query_params.limit,
+                "total_records": total_count,
+                "total_pages": total_pages,
+                "has_next": has_next,
+                "has_prev": has_prev,
+                "next_page": query_params.page + 1 if has_next else None,
+                "prev_page": query_params.page - 1 if has_prev else None
+            },
+            metadata={
+                "request_id": request_id,
+                "api_latency_ms": round(latency_ms, 2),
+                "filters_applied": {
+                    "source": query_params.source,
+                    "coin_id": query_params.coin_id,
+                    "symbol": query_params.symbol
+                },
+                "records_returned": len(data)
+            }
+        )
+        
+        logger.info(
+            "Data request completed",
+            request_id=request_id,
+            page=query_params.page,
+            limit=query_params.limit,
+            total_records=total_count,
+            records_returned=len(data),
+            latency_ms=round(latency_ms, 2)
+        )
+        
+        return response
+        
+    except ValueError as e:
+        logger.warning(
+            "Invalid query parameters",
+            request_id=request_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    except Exception as e:
+        logger.error(
+            "Data request failed",
+            request_id=request_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/data/summary")
+async def get_data_summary(
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """
+    Get summary statistics about the available data.
+    
+    Returns counts by source, latest update times, and other metadata.
+    """
+    start_time = time.time()
+    request_id = getattr(request.state, "request_id", "unknown") if request else "unknown"
+    
+    try:
+        # Get counts by source
+        source_counts = db.query(
+            NormalizedCryptoData.source,
+            func.count(NormalizedCryptoData.id).label('count')
+        ).group_by(NormalizedCryptoData.source).all()
+        
+        # Get latest update by source
+        latest_updates = db.query(
+            NormalizedCryptoData.source,
+            func.max(NormalizedCryptoData.processed_at).label('latest_update')
+        ).group_by(NormalizedCryptoData.source).all()
+        
+        # Get total count
+        total_records = db.query(func.count(NormalizedCryptoData.id)).scalar()
+        
+        # Get unique coins count
+        unique_coins = db.query(func.count(func.distinct(NormalizedCryptoData.coin_id))).scalar()
+        
+        # Calculate latency
+        latency_ms = (time.time() - start_time) * 1000
+        
+        # Build response
+        summary = {
+            "total_records": total_records,
+            "unique_coins": unique_coins,
+            "records_by_source": {row.source: row.count for row in source_counts},
+            "latest_updates": {row.source: row.latest_update.isoformat() for row in latest_updates},
+            "metadata": {
+                "request_id": request_id,
+                "api_latency_ms": round(latency_ms, 2)
+            }
+        }
+        
+        logger.info(
+            "Data summary request completed",
+            request_id=request_id,
+            total_records=total_records,
+            latency_ms=round(latency_ms, 2)
+        )
+        
+        return summary
+        
+    except Exception as e:
+        logger.error(
+            "Data summary request failed",
+            request_id=request_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail="Internal server error")
