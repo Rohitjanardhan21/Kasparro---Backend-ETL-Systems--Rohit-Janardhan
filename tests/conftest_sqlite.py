@@ -1,4 +1,4 @@
-"""Test configuration and fixtures."""
+"""Alternative test configuration using SQLite for isolated testing."""
 
 import pytest
 import os
@@ -14,10 +14,9 @@ from api.main import app
 
 @pytest.fixture(scope="session")
 def test_settings():
-    """Test settings with PostgreSQL test database."""
-    # Use the same PostgreSQL database as the running container with correct credentials
+    """Test settings with SQLite in-memory database."""
     return Settings(
-        database_url="postgresql://postgres:password@db:5432/kasparro_etl",
+        database_url="sqlite:///./test.db",
         coinpaprika_api_key="test_key",
         coingecko_api_key="test_key",
         log_level="DEBUG",
@@ -27,10 +26,13 @@ def test_settings():
 
 @pytest.fixture(scope="session")
 def test_engine(test_settings):
-    """Create test database engine."""
-    engine = create_engine(test_settings.database_url)
+    """Create test database engine with SQLite."""
+    engine = create_engine(
+        test_settings.database_url,
+        connect_args={"check_same_thread": False}  # SQLite specific
+    )
     
-    # Create tables if they don't exist
+    # Create all tables
     Base.metadata.create_all(bind=engine)
     return engine
 
