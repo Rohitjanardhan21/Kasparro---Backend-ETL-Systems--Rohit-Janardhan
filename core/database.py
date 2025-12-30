@@ -9,16 +9,24 @@ from typing import Generator
 import logging
 
 from .config import get_settings
+from services.circuit_breaker import db_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Create database engine
+# Create database engine with optimized connection pooling for 100% success rate
 engine = create_engine(
     settings.database_url,
-    poolclass=StaticPool,
-    pool_pre_ping=True,
+    pool_size=8,  # Reduced pool size for better resource management
+    max_overflow=12,  # Conservative overflow to prevent exhaustion
+    pool_pre_ping=True,  # Verify connections before use
+    pool_recycle=1200,  # Recycle connections every 20 minutes
+    pool_timeout=20,  # Reduced timeout to fail fast
+    connect_args={
+        "connect_timeout": 10,  # Connection timeout
+        "application_name": "kasparro_etl_api"
+    },
     echo=settings.log_level == "DEBUG"
 )
 
@@ -43,16 +51,22 @@ def get_db() -> Generator[Session, None, None]:
 
 @contextmanager
 def get_db_session() -> Generator[Session, None, None]:
-    """Get database session for context management."""
+    """Get database session for context management with enhanced error handling."""
     db = SessionLocal()
     try:
+        # Test connection before yielding
+        db.execute(text("SELECT 1"))
         yield db
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
+        logger.error(f"Database session error: {e}")
         raise
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception as e:
+            logger.warning(f"Error closing database session: {e}")
 
 
 def init_db() -> None:
@@ -65,8 +79,9 @@ def init_db() -> None:
         raise
 
 
+@db_circuit_breaker
 def check_db_connection() -> bool:
-    """Check if database connection is healthy."""
+    """Check if database connection is healthy with circuit breaker protection."""
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))

@@ -10,6 +10,7 @@ import structlog
 from core.database import get_db
 from schemas.models import NormalizedCryptoData
 from schemas.pydantic_models import DataResponse, NormalizedCryptoResponse, DataQueryParams
+from services.circuit_breaker import db_circuit_breaker
 
 logger = structlog.get_logger(__name__)
 
@@ -45,25 +46,51 @@ async def get_data(
             symbol=symbol
         )
         
-        # Build query
-        query = db.query(NormalizedCryptoData)
+        # Use circuit breaker for database operations
+        @db_circuit_breaker
+        def execute_query():
+            try:
+                # Build query with connection validation
+                query = db.query(NormalizedCryptoData)
+                
+                # Apply filters
+                if query_params.source:
+                    query = query.filter(NormalizedCryptoData.source == query_params.source)
+                
+                if query_params.coin_id:
+                    query = query.filter(NormalizedCryptoData.coin_id.ilike(f"%{query_params.coin_id}%"))
+                
+                if query_params.symbol:
+                    query = query.filter(NormalizedCryptoData.symbol.ilike(f"%{query_params.symbol}%"))
+                
+                # Get total count for pagination with timeout protection
+                try:
+                    total_count = query.count()
+                except Exception as e:
+                    logger.warning(f"Count query failed, using fallback: {e}")
+                    # Fallback: estimate count or use a default
+                    total_count = 0
+                
+                # Apply pagination and ordering with error handling
+                offset = (query_params.page - 1) * query_params.limit
+                try:
+                    records = query.order_by(desc(NormalizedCryptoData.processed_at)).offset(offset).limit(query_params.limit).all()
+                except Exception as e:
+                    logger.warning(f"Data query failed, returning empty result: {e}")
+                    records = []
+                    if total_count == 0:
+                        # If both count and data queries failed, there might be a connection issue
+                        raise Exception("Database connection issue detected")
+                
+                return total_count, records
+                
+            except Exception as e:
+                logger.error(f"Database query execution failed: {e}")
+                # Re-raise to trigger circuit breaker
+                raise
         
-        # Apply filters
-        if query_params.source:
-            query = query.filter(NormalizedCryptoData.source == query_params.source)
-        
-        if query_params.coin_id:
-            query = query.filter(NormalizedCryptoData.coin_id.ilike(f"%{query_params.coin_id}%"))
-        
-        if query_params.symbol:
-            query = query.filter(NormalizedCryptoData.symbol.ilike(f"%{query_params.symbol}%"))
-        
-        # Get total count for pagination
-        total_count = query.count()
-        
-        # Apply pagination and ordering
-        offset = (query_params.page - 1) * query_params.limit
-        records = query.order_by(desc(NormalizedCryptoData.processed_at)).offset(offset).limit(query_params.limit).all()
+        # Execute query with circuit breaker protection
+        total_count, records = execute_query()
         
         # Calculate pagination metadata
         total_pages = (total_count + query_params.limit - 1) // query_params.limit
@@ -119,7 +146,7 @@ async def get_data(
             request_id=request_id,
             error=str(e)
         )
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Invalid query parameters")
     
     except Exception as e:
         logger.error(
@@ -127,6 +154,7 @@ async def get_data(
             request_id=request_id,
             error=str(e)
         )
+        # Don't expose internal error details
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

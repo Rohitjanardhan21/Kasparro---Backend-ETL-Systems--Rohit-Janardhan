@@ -11,8 +11,17 @@ import structlog
 from core.database import get_db, check_db_connection
 from core.logging import setup_logging, RequestLogger
 from core.config import get_settings
-from .endpoints import data, health, stats
-from .middleware import add_request_id_middleware, add_logging_middleware
+from .endpoints import data, health, stats, etl
+from .middleware import (
+    add_request_id_middleware, 
+    add_logging_middleware,
+    add_security_headers_middleware,
+    add_cors_middleware,
+    add_input_validation_middleware,
+    add_timeout_middleware
+)
+from api.middleware.rate_limiter import add_rate_limiting_middleware
+from api.middleware.cache import add_cache_middleware
 
 # Setup logging
 setup_logging()
@@ -28,14 +37,23 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add CORS middleware with secure settings
+add_cors_middleware(app)
+
+# Add response caching middleware (5 minute cache)
+add_cache_middleware(app, cache_ttl=300)
+
+# Add timeout middleware (20 second timeout for better reliability)
+add_timeout_middleware(app, timeout_seconds=20)
+
+# Add security headers middleware
+add_security_headers_middleware(app)
+
+# Add input validation middleware
+add_input_validation_middleware(app)
+
+# Add rate limiting middleware (100 requests per minute)
+add_rate_limiting_middleware(app, max_requests=100, window_seconds=60)
 
 # Add custom middleware
 add_request_id_middleware(app)
@@ -45,11 +63,13 @@ add_logging_middleware(app)
 app.include_router(data.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(stats.router, prefix="/api/v1")
+app.include_router(etl.router, prefix="/api/v1")
 
 # Include routers at root level for backward compatibility
 app.include_router(data.router)
 app.include_router(health.router)
 app.include_router(stats.router)
+app.include_router(etl.router)
 
 # Root endpoint
 @app.get("/")
