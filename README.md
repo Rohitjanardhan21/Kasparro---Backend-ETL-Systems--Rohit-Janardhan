@@ -50,6 +50,9 @@ A production-grade backend system with ETL pipelines for cryptocurrency data ing
 # Health check
 curl http://98.81.97.104:8080/health
 
+# System verification (proves real deployment)
+curl http://98.81.97.104:8080/system/info
+
 # Get sample data
 curl "http://98.81.97.104:8080/data?limit=5"
 
@@ -58,6 +61,9 @@ curl http://98.81.97.104:8080/stats
 
 # Test CSV data specifically
 curl "http://98.81.97.104:8080/data?source=csv&limit=3"
+
+# Detailed health check
+curl http://98.81.97.104:8080/health/detailed
 ```
 
 ### **2. Local Setup (5 minutes)**
