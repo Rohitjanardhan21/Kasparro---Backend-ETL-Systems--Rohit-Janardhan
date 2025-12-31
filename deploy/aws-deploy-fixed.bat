@@ -106,7 +106,7 @@ echo     image: postgres:15
 echo     environment:
 echo       POSTGRES_DB: kasparro_etl
 echo       POSTGRES_USER: postgres
-echo       POSTGRES_PASSWORD: secure_password_123
+echo       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-secure_db_password}
 echo     volumes:
 echo       - postgres_data:/var/lib/postgresql/data
 echo     healthcheck:
@@ -121,8 +121,8 @@ echo     ports:
 echo       - "80:8000"
 echo       - "8080:8000"
 echo     environment:
-echo       - DATABASE_URL=postgresql://postgres:secure_password_123@db:5432/kasparro_etl
-echo       - COINGECKO_API_KEY=CG-2TufP4yQWAApXnxZtWjkvwq1my
+echo       - DATABASE_URL=postgresql://postgres:\${POSTGRES_PASSWORD:-secure_db_password}@db:5432/kasparro_etl
+echo       - COINGECKO_API_KEY=\${COINGECKO_API_KEY}
 echo       - COINPAPRIKA_API_KEY=
 echo       - ENVIRONMENT=production
 echo       - LOG_LEVEL=INFO

@@ -126,7 +126,7 @@ services:
     environment:
       POSTGRES_DB: kasparro_etl
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secure_password_123
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-secure_db_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -142,8 +142,8 @@ services:
       - "80:8000"
       - "8080:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:secure_password_123@db:5432/kasparro_etl
-      - COINGECKO_API_KEY=CG-2TufP4yQWAApXnxZtWjkvwq1my
+      - DATABASE_URL=postgresql://postgres:\${POSTGRES_PASSWORD:-secure_db_password}@db:5432/kasparro_etl
+      - COINGECKO_API_KEY=\${COINGECKO_API_KEY}
       - COINPAPRIKA_API_KEY=
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO

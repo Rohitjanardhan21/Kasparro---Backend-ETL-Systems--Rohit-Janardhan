@@ -129,10 +129,13 @@ async def shutdown_event():
 if __name__ == "__main__":
     import uvicorn
     
+    # Production-optimized uvicorn configuration
     uvicorn.run(
         "api.main:app",
         host=settings.api_host,
         port=settings.api_port,
-        reload=settings.environment == "development",
-        log_level=settings.log_level.lower()
+        reload=False,  # Always disabled for production safety
+        log_level=settings.log_level.lower(),
+        workers=1,  # Single worker for simplicity, can be increased for scale
+        access_log=True
     )

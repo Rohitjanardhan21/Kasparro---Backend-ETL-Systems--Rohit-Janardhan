@@ -9,9 +9,9 @@ services:
           name: kasparro-etl-db
           property: connectionString
       - key: COINGECKO_API_KEY
-        value: CG-2TufP4yQWAApXnxZtWjkvwq1my
+        value: YOUR_COINGECKO_API_KEY_HERE
       - key: COINPAPRIKA_API_KEY
-        value: ""
+        value: YOUR_COINPAPRIKA_API_KEY_HERE
       - key: ENVIRONMENT
         value: production
       - key: LOG_LEVEL
