@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 import time
 import structlog
 
@@ -15,6 +16,121 @@ from services.circuit_breaker import db_circuit_breaker
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/data/samples")
+async def get_data_samples(db: Session = Depends(get_db)):
+    """
+    Get sample data from each source for evaluation verification.
+    
+    Returns representative samples from CSV, CoinPaprika, and CoinGecko
+    to demonstrate multi-source ETL functionality.
+    """
+    try:
+        samples = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "sources": {}
+        }
+        
+        # Get CSV samples
+        csv_query = db.query(NormalizedCryptoData).filter(
+            NormalizedCryptoData.source == "csv"
+        ).limit(3)
+        csv_samples = csv_query.all()
+        
+        samples["sources"]["csv"] = {
+            "count": len(csv_samples),
+            "samples": [
+                {
+                    "coin_id": item.coin_id,
+                    "name": item.name,
+                    "symbol": item.symbol,
+                    "price_usd": float(item.price_usd),
+                    "source": item.source,
+                    "processed_at": item.processed_at.isoformat()
+                }
+                for item in csv_samples
+            ]
+        }
+        
+        # Get CoinPaprika samples
+        coinpaprika_query = db.query(NormalizedCryptoData).filter(
+            NormalizedCryptoData.source == "coinpaprika"
+        ).limit(3)
+        coinpaprika_samples = coinpaprika_query.all()
+        
+        samples["sources"]["coinpaprika"] = {
+            "count": len(coinpaprika_samples),
+            "samples": [
+                {
+                    "coin_id": item.coin_id,
+                    "name": item.name,
+                    "symbol": item.symbol,
+                    "price_usd": float(item.price_usd),
+                    "source": item.source,
+                    "processed_at": item.processed_at.isoformat()
+                }
+                for item in coinpaprika_samples
+            ]
+        }
+        
+        # Get CoinGecko samples
+        coingecko_query = db.query(NormalizedCryptoData).filter(
+            NormalizedCryptoData.source == "coingecko"
+        ).limit(3)
+        coingecko_samples = coingecko_query.all()
+        
+        samples["sources"]["coingecko"] = {
+            "count": len(coingecko_samples),
+            "samples": [
+                {
+                    "coin_id": item.coin_id,
+                    "name": item.name,
+                    "symbol": item.symbol,
+                    "price_usd": float(item.price_usd),
+                    "source": item.source,
+                    "processed_at": item.processed_at.isoformat()
+                }
+                for item in coingecko_samples
+            ]
+        }
+        
+        # Add summary
+        total_csv = db.query(func.count(NormalizedCryptoData.id)).filter(
+            NormalizedCryptoData.source == "csv"
+        ).scalar() or 0
+        
+        total_coinpaprika = db.query(func.count(NormalizedCryptoData.id)).filter(
+            NormalizedCryptoData.source == "coinpaprika"
+        ).scalar() or 0
+        
+        total_coingecko = db.query(func.count(NormalizedCryptoData.id)).filter(
+            NormalizedCryptoData.source == "coingecko"
+        ).scalar() or 0
+        
+        samples["summary"] = {
+            "total_records": total_csv + total_coinpaprika + total_coingecko,
+            "by_source": {
+                "csv": total_csv,
+                "coinpaprika": total_coinpaprika,
+                "coingecko": total_coingecko
+            },
+            "multi_source_validation": {
+                "csv_present": total_csv > 0,
+                "coinpaprika_present": total_coinpaprika > 0,
+                "coingecko_present": total_coingecko > 0,
+                "all_sources_working": all([total_csv > 0, total_coinpaprika > 0, total_coingecko > 0])
+            }
+        }
+        
+        return samples
+        
+    except Exception as e:
+        logger.error("Failed to get data samples", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve data samples: {str(e)}"
+        )
 
 
 @router.get("/data", response_model=DataResponse)
